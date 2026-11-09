@@ -39,6 +39,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
       - run: pnpm exec prisma validate
       - run: pnpm run check
       - name: Unit tests (with coverage)
@@ -96,7 +97,7 @@ jobs:
           docker image prune -f
       - name: Verify container is healthy
         run: |
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             s=$(docker inspect -f '{{.State.Health.Status}}' sampaimana-api 2>/dev/null || true)
             if [ "$s" = healthy ]; then
               docker exec sampaimana-api node -e "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
