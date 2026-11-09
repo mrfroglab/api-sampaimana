@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import rl from '../src/middlewares/rateLimit.js';
+import rl from '../../src/middlewares/rateLimit.js';
 
 const req = (remoteAddress, xff) => ({ headers: xff === undefined ? {} : { 'x-forwarded-for': xff }, socket: { remoteAddress } });
 

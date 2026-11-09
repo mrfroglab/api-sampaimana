@@ -30,20 +30,29 @@ const schema = z
     }
   });
 
-const parsed = schema.safeParse(process.env);
+/**
+ * Validates a raw environment object. Pure: returns { env } or { errors } so it can be unit tested.
+ */
+const parseEnv = (source) => {
+  const parsed = schema.safeParse(source);
+  if (!parsed.success) {
+    return { errors: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) };
+  }
+  const env = parsed.data;
+  env.corsOrigins = env.CORS_ORIGIN
+    ? env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+    : ['http://localhost:5173', 'http://localhost:3000'];
+  env.isProd = env.NODE_ENV === 'production';
+  env.isTest = env.NODE_ENV === 'test';
+  return { env };
+};
 
-if (!parsed.success) {
-  const lines = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`);
+const result = parseEnv(process.env);
+if (result.errors) {
   // Fail fast: never boot with a weak or missing secret.
-  console.error(`Konfigurasi environment tidak valid:\n${lines.join('\n')}`);
+  console.error(`Konfigurasi environment tidak valid:\n${result.errors.map((e) => `  - ${e}`).join('\n')}`);
   process.exit(1);
 }
 
-const env = parsed.data;
-env.corsOrigins = env.CORS_ORIGIN
-  ? env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
-  : ['http://localhost:5173', 'http://localhost:3000'];
-env.isProd = env.NODE_ENV === 'production';
-env.isTest = env.NODE_ENV === 'test';
-
-module.exports = env;
+module.exports = result.env;
+module.exports.parseEnv = parseEnv;

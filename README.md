@@ -43,11 +43,23 @@ Seed bersifat idempoten dan **tidak pernah menghapus data**. Seed memastikan kat
 ## Test
 
 ```bash
-docker exec sampaimana-devdb psql -U sm -c "CREATE DATABASE sampaimana_test"
-pnpm test
+pnpm test:unit          # 62 unit test, tanpa database (juga jalan di pre-commit)
+pnpm test:coverage      # unit test + laporan coverage
+pnpm test:integration   # 23 test HTTP + Postgres sungguhan, butuh TEST_DATABASE_URL
 ```
 
-Test memakai Postgres sungguhan (`TEST_DATABASE_URL`, nama DB harus mengandung `test`). Cakupannya: alur auth dan rotasi token, RBAC, sinkronisasi tahapan dan status, notifikasi, validasi file, moderasi, koreksi, dan ekspor.
+- **Unit** (`test/unit`) menguji validasi env, slug, deteksi file dari *magic bytes*, pengaman path traversal, pemetaan error, paginasi, RBAC, token JWT, penyamaran log audit, escape CSV, filter pencarian, dan bypass rate limit internal.
+- **Integration** (`test/integration`) menguji alur auth dan rotasi token, RBAC, sinkronisasi tahapan dan status, notifikasi, unggahan, moderasi, koreksi, dan ekspor. Test ini memakai DB yang namanya harus mengandung `test`; migrasi diterapkan dengan `migrate deploy` dan data dibersihkan dengan `TRUNCATE`.
+
+## CI/CD
+
+`.github/workflows/deploy.yml` berjalan di setiap push ke `main`:
+
+1. Unit dan integration test di GitHub Actions dengan service container Postgres.
+2. Build image, lalu push ke `ghcr.io/mrfroglab/api-sampaimana` (`latest` dan sha).
+3. Deploy oleh runner self-hosted di server: `docker compose pull api && up -d --no-deps api`, lalu cek health. Migrasi berjalan otomatis saat container start.
+
+Pull request hanya menjalankan test.
 
 ## Dokumentasi API
 
@@ -55,4 +67,4 @@ Swagger UI ada di `/api/docs`, dan spesifikasi mentahnya di `/api/openapi.json`.
 
 ## Deploy
 
-Image Docker menjalankan `prisma migrate deploy` lalu seed (idempoten) sebelum start. Upload disimpan di `/data/uploads`, jadi pasang volume. Cara deploy ke server ada di `deploy/` pada repo web.
+Image Docker menjalankan `prisma migrate deploy` lalu seed (idempoten) sebelum start. Upload disimpan di `/data/uploads`, jadi pasang volume. Setup awal stack di server ada di `deploy/` pada repo web; update berikutnya lewat CI/CD.

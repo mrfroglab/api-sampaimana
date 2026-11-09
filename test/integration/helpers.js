@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const request = require('supertest');
-const app = require('../src/app');
-const prisma = require('../src/lib/prisma');
+const app = require('../../src/app');
+const prisma = require('../../src/lib/prisma');
 
 const api = () => request(app);
 

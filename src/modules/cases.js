@@ -261,3 +261,5 @@ router.post('/:key/corrections', writeLimiter, async (req, res) => {
 
 module.exports = router;
 module.exports.findCaseKey = findCaseKey;
+module.exports.csvCell = csvCell;
+module.exports.buildWhere = buildWhere;
