@@ -60,7 +60,10 @@ router.post('/login', authLimiter, async (req, res) => {
 });
 
 router.post('/refresh', async (req, res) => {
-  const result = await tokens.rotateRefreshToken(req.cookies?.[tokens.REFRESH_COOKIE], req.get('user-agent'));
+  const raw = req.cookies?.[tokens.REFRESH_COOKIE];
+  // Anonymous visitors have no session cookie: answer "no session" without an error status.
+  if (!raw) return ok(res, null);
+  const result = await tokens.rotateRefreshToken(raw, req.get('user-agent'));
   if (!result) {
     res.clearCookie(tokens.REFRESH_COOKIE, { ...tokens.refreshCookieOptions(), maxAge: undefined });
     throw unauthorized('Sesi berakhir. Silakan masuk kembali.');
