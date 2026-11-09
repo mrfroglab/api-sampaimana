@@ -1,33 +1,52 @@
 {
-  "name": "nic-backend",
-  "version": "1.0.0",
-  "description": "Backend API for Legal Transparency Platform",
-  "main": "src/index.js",
+  "name": "sampaimana-api",
+  "version": "2.0.0",
+  "private": true,
+  "description": "API Sampai Mana \u2014 pelacak perkembangan kasus hukum publik",
+  "main": "src/server.js",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "build": "prisma generate",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "node prisma/seed.js",
-    "prepare": "husky"
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "seed": "node prisma/seed.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "node --check src/server.js && node --check src/app.js",
+    "prepare": "husky || true"
   },
   "dependencies": {
-    "@prisma/client": "^5.12.1",
-    "bcryptjs": "^2.4.3",
+    "@prisma/client": "6.19.3",
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.0",
-    "zod": "^3.22.4",
-    "prisma": "^5.12.1"
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.10",
+    "prisma": "6.19.3",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.1.12"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
   },
   "devDependencies": {
     "husky": "^9.1.7",
-    "nodemon": "^3.1.0"
+    "supertest": "^7.1.4",
+    "vitest": "^3.2.4"
   }
-
 }

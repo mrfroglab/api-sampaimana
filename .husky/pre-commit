@@ -1,1 +1,1 @@
-node --check src/index.js
+pnpm run check

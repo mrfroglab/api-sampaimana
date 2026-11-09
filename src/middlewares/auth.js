@@ -1,80 +1,57 @@
-const jwt = require('jsonwebtoken');
-const prisma = require('../config/prisma');
+const prisma = require('../lib/prisma');
+const { verifyAccessToken } = require('../lib/tokens');
+const { unauthorized, forbidden } = require('../lib/http');
 
-/**
- * Authentication Middleware
- */
-const authenticate = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        message: 'Akses ditolak. Token tidak ditemukan.',
-      });
-    }
+const userSelect = { id: true, email: true, name: true, role: true, bannedAt: true, emailNotifications: true, createdAt: true };
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super-secret-key-change-in-production-12345!');
-
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Pengguna tidak ditemukan atau token tidak valid.',
-      });
-    }
-
-    req.user = user;
-    next();
-  } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Token telah kedaluwarsa.',
-      });
-    }
-    return res.status(401).json({
-      success: false,
-      message: 'Token tidak valid.',
-    });
-  }
+const readBearer = (req) => {
+  const header = req.headers.authorization;
+  return header?.startsWith('Bearer ') ? header.slice(7) : null;
 };
 
-/**
- * Authorization Middleware (Role check)
- * @param  {...string} roles - Allowed roles
- */
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Pengguna tidak terautentikasi.',
-      });
-    }
+const loadUser = async (token) => {
+  const payload = verifyAccessToken(token);
+  return prisma.user.findUnique({ where: { id: payload.sub }, select: userSelect });
+};
 
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Akses ditolak. Anda tidak memiliki izin untuk melakukan tindakan ini.',
-      });
-    }
+const authenticate = async (req, res, next) => {
+  const token = readBearer(req);
+  if (!token) throw unauthorized();
+  let user;
+  try {
+    user = await loadUser(token);
+  } catch (err) {
+    throw unauthorized(err.name === 'TokenExpiredError' ? 'Sesi telah kedaluwarsa.' : 'Token tidak valid.');
+  }
+  if (!user) throw unauthorized('Akun tidak ditemukan.');
+  if (user.bannedAt) throw forbidden('Akun Anda dinonaktifkan oleh moderator.');
+  req.user = user;
+  next();
+};
 
+/** Attaches req.user when a valid token is present; never rejects. */
+const optionalAuth = async (req, res, next) => {
+  const token = readBearer(req);
+  if (token) {
+    try {
+      const user = await loadUser(token);
+      if (user && !user.bannedAt) req.user = user;
+    } catch {
+      /* anonymous */
+    }
+  }
+  next();
+};
+
+const authorize =
+  (...roles) =>
+  (req, res, next) => {
+    if (!req.user) throw unauthorized();
+    if (!roles.includes(req.user.role)) throw forbidden();
     next();
   };
-};
 
-module.exports = {
-  authenticate,
-  authorize,
-};
+const STAFF = ['SUPER_ADMIN', 'EDITOR', 'VIEWER'];
+const EDITORS = ['SUPER_ADMIN', 'EDITOR'];
+
+module.exports = { authenticate, optionalAuth, authorize, userSelect, STAFF, EDITORS };

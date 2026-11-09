@@ -1,14 +1,12 @@
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
-
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
-
 
 enum Role {
   SUPER_ADMIN
@@ -37,21 +35,67 @@ enum ContributionStatus {
   REJECTED
 }
 
+enum SourceType {
+  OFFICIAL
+  COURT
+  MEDIA
+  OTHER
+}
+
+enum CorrectionStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum NotificationType {
+  STATUS_CHANGE
+  STAGE_UPDATE
+  ARTICLE_PUBLISHED
+  CONTRIBUTION_REVIEWED
+}
+
 model User {
-  id                   String             @id @default(uuid())
-  email                String             @unique
-  passwordHash         String
-  name                 String
-  role                 Role               @default(CONTRIBUTOR)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-  stagesCreated        CaseStage[]        @relation("StageCreator")
-  articlesCreated      Article[]          @relation("ArticleAuthor")
-  contributions        CaseContribution[] @relation("Contributor")
-  reviewedContributions CaseContribution[] @relation("Reviewer")
-  activityLogs         ActivityLog[]
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  passwordHash          String
+  name                  String
+  role                  Role                @default(CONTRIBUTOR)
+  bannedAt              DateTime?
+  emailNotifications    Boolean             @default(true)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  stagesCreated         CaseStage[]         @relation("StageCreator")
+  articlesCreated       Article[]           @relation("ArticleAuthor")
+  contributions         CaseContribution[]  @relation("Contributor")
+  reviewedContributions CaseContribution[]  @relation("Reviewer")
+  verifiedSources       Source[]            @relation("SourceVerifier")
+  handledCorrections    CorrectionRequest[] @relation("CorrectionHandler")
+  activityLogs          ActivityLog[]
+  revisions             CaseRevision[]
+  refreshTokens         RefreshToken[]
+  follows               Follow[]
+  notifications         Notification[]
 
   @@map("users")
+}
+
+/// Opaque refresh tokens (only the SHA-256 hash is stored). Rotated on every use;
+/// reuse of a revoked token revokes the whole family.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  family    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
 }
 
 model Category {
@@ -77,41 +121,66 @@ model Defendant {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([caseId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "defendants_name_trgm_idx")
   @@map("defendants")
 }
 
 model Case {
-  id            String             @id @default(uuid())
-  caseNumber    String             @unique
-  title         String
-  description   String
-  categoryId    String
-  category      Category           @relation(fields: [categoryId], references: [id])
-  currentStatus CaseStatus         @default(PELAPORAN)
-  isActive      Boolean            @default(true)
-  defendants    Defendant[]
-  stages        CaseStage[]
-  contributions CaseContribution[]
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id             String              @id @default(uuid())
+  slug           String              @unique
+  caseNumber     String              @unique
+  title          String
+  summary        String?
+  description    String              @db.Text
+  categoryId     String
+  category       Category            @relation(fields: [categoryId], references: [id])
+  currentStatus  CaseStatus          @default(PELAPORAN)
+  institution    String?
+  court          String?
+  region         String?
+  filedAt        DateTime?
+  lastActivityAt DateTime            @default(now())
+  isActive       Boolean             @default(true)
+  defendants     Defendant[]
+  stages         CaseStage[]
+  contributions  CaseContribution[]
+  sources        Source[]
+  revisions      CaseRevision[]
+  follows        Follow[]
+  corrections    CorrectionRequest[]
+  notifications  Notification[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
+  @@index([isActive, currentStatus])
+  @@index([categoryId])
+  @@index([lastActivityAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "cases_title_trgm_idx")
+  @@index([caseNumber(ops: raw("gin_trgm_ops"))], type: Gin, map: "cases_case_number_trgm_idx")
   @@map("cases")
 }
 
 model CaseStage {
-  id        String      @id @default(uuid())
-  caseId    String
-  case      Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  stageType CaseStatus
-  status    StageStatus @default(PENDING)
-  startedAt DateTime    @default(now())
-  endedAt   DateTime?
-  article   Article?    @relation("StageArticle")
+  id          String      @id @default(uuid())
+  caseId      String
+  case        Case        @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stageType   CaseStatus
+  status      StageStatus @default(PENDING)
+  title       String?
+  summary     String?     @db.Text
+  startedAt   DateTime    @default(now())
+  endedAt     DateTime?
+  /// Estimated/statutory deadline for this stage (e.g. masa penahanan, jadwal sidang).
+  dueAt       DateTime?
+  article     Article?    @relation("StageArticle")
+  sources     Source[]
   createdById String
-  createdBy   User      @relation("StageCreator", fields: [createdById], references: [id])
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdBy   User        @relation("StageCreator", fields: [createdById], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
+  @@index([caseId, startedAt])
   @@map("case_stages")
 }
 
@@ -124,11 +193,49 @@ model Article {
   publishedAt DateTime  @default(now())
   authorId    String
   author      User      @relation("ArticleAuthor", fields: [authorId], references: [id])
-  attachments Json      @default("[]")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   @@map("articles")
+}
+
+model Source {
+  id           String     @id @default(uuid())
+  caseId       String
+  case         Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stageId      String?
+  stage        CaseStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  title        String
+  url          String
+  publisher    String?
+  type         SourceType @default(MEDIA)
+  publishedAt  DateTime?
+  isVerified   Boolean    @default(false)
+  verifiedById String?
+  verifiedBy   User?      @relation("SourceVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([caseId])
+  @@index([stageId])
+  @@map("sources")
+}
+
+/// Public, append-only history of what changed on a case and why.
+model CaseRevision {
+  id        String   @id @default(uuid())
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  summary   String
+  reason    String?  @db.Text
+  changes   Json?
+  createdAt DateTime @default(now())
+
+  @@index([caseId, createdAt])
+  @@map("case_revisions")
 }
 
 model CaseContribution {
@@ -138,16 +245,70 @@ model CaseContribution {
   userId          String
   user            User               @relation("Contributor", fields: [userId], references: [id], onDelete: Cascade)
   description     String             @db.Text
+  proposedStage   CaseStatus?
   status          ContributionStatus @default(PENDING)
   proofLinks      Json               @default("[]")
   proofFiles      Json               @default("[]")
   reviewedById    String?
   reviewedBy      User?              @relation("Reviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
   rejectionReason String?            @db.Text
+  appliedStageId  String?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
+  @@index([status, createdAt])
+  @@index([userId])
   @@map("case_contributions")
+}
+
+model Follow {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, caseId])
+  @@index([caseId])
+  @@map("follows")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  caseId    String?
+  case      Case?            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+/// Hak jawab / permintaan koreksi dari publik atau pihak terkait.
+model CorrectionRequest {
+  id          String           @id @default(uuid())
+  caseId      String
+  case        Case             @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  relation    String
+  message     String           @db.Text
+  status      CorrectionStatus @default(OPEN)
+  response    String?          @db.Text
+  handledById String?
+  handledBy   User?            @relation("CorrectionHandler", fields: [handledById], references: [id], onDelete: SetNull)
+  handledAt   DateTime?
+  createdAt   DateTime         @default(now())
+
+  @@index([status, createdAt])
+  @@map("correction_requests")
 }
 
 model ActivityLog {
@@ -160,5 +321,6 @@ model ActivityLog {
   metadata  Json?
   createdAt DateTime @default(now())
 
+  @@index([createdAt])
   @@map("activity_logs")
 }

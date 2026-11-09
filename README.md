@@ -1,85 +1,58 @@
-# 🏛️ API Platform Transparansi Hukum (NIC) - Backend
+# Sampai Mana — API
 
-> Trigger CI/CD test - test push #3
+Backend untuk **Sampai Mana**, pelacak perkembangan kasus hukum publik di Indonesia: dari pelaporan, penyidikan, penuntutan, persidangan, sampai putusan.
 
-Backend API lengkap dibangun menggunakan Node.js, Express.js, Prisma ORM, PostgreSQL, dan Swagger UI untuk dokumentasi API.
+Node.js 22 · Express 5 · Prisma 6 · PostgreSQL 16 · Zod 4 · Vitest
 
-## 🚀 Fitur Backend
+## Fitur
 
-- **Autentikasi & Autorisasi**: Registrasi Kontributor, Login (JWT Token), Refresh Token, Verifikasi Profile, dan Guarding Endpoint berdasarkan role (`SUPER_ADMIN`, `EDITOR`, `VIEWER`, `CONTRIBUTOR`).
-- **Manajemen Kasus (Public & Admin)**: Pencarian full-text, pemfilteran berdasarkan kategori atau status, detail kasus, timeline tahapan kronologis.
-- **Artikel Penjelasan Detail**: Setiap tahapan memiliki satu artikel mendalam yang menjelaskan dasar penetapan status.
-- **Ekspor Data**: Mendukung ekspor daftar kasus ke file CSV dan pencetakan data kasus ke format ramah PDF.
-- **Crowdsourcing & Kontribusi**: Kontributor publik dapat mengunggah kemajuan/update kasus baru beserta bukti link maupun file pendukung (foto, dokumen).
-- **Moderasi & Validasi**: Dashboard bagi Admin untuk menyetujui atau menolak kontribusi publik dengan pencatatan alasan penolakan.
-- **Audit Trail**: Logging otomatis untuk semua tindakan admin/modifikasi data ke tabel `Activity Log`.
-- **Dokumentasi Swagger**: API terdokumentasi lengkap dan interaktif menggunakan Swagger UI.
+- **Linimasa kasus.** Setiap kasus punya tahapan, tenggat (`dueAt`), artikel penjelasan per tahapan, dan sumber. Menambah tahapan berstatus *AKTIF* otomatis menutup tahapan sebelumnya dan menggeser status kasus.
+- **Riwayat revisi publik.** Setiap perubahan status, tahapan, artikel, sumber, dan koreksi tercatat di `case_revisions` dan bisa dibaca publik. Perubahan status langsung wajib disertai alasan.
+- **Sumber terverifikasi.** Sumber bertipe resmi, putusan pengadilan, media, atau lainnya, dengan tanda verifikasi oleh redaksi.
+- **Ikuti kasus dan notifikasi.** Notifikasi di aplikasi, plus email bila `SMTP_URL` diisi.
+- **Kontribusi publik.** File bukti diperiksa dari *magic bytes* (bukan ekstensi) dan disimpan privat. Akun baru dibatasi, dan moderator melihat reputasi kontributor. Kontribusi yang diterima bisa langsung dijadikan tahapan dan tautannya diimpor sebagai sumber.
+- **Hak jawab dan koreksi.** Formulir publik tanpa login, dibatasi rate limit dan dilengkapi honeypot. Catatan koreksi bisa ditampilkan di riwayat kasus.
+- **Data terbuka.** `GET /api/cases/export.csv` dan `export.json` (CC BY 4.0). CSV aman dari *formula injection*.
+- **Statistik.** Rata-rata dan median durasi tiap tahapan, kasus aktif terlama, dan pembaruan terbaru.
 
----
+## Keamanan
 
-## 🛠️ Instalasi & Setup Lokal
+- Server menolak start bila `JWT_SECRET` kurang dari 32 karakter, atau bila `CORS_ORIGIN` kosong atau `*` di production.
+- Access token JWT berumur 15 menit dan disimpan di memori klien. Refresh token *opaque* disimpan di cookie `httpOnly; Secure; SameSite=Strict; Path=/api/auth`, dirotasi setiap dipakai, dan hanya hash-nya yang tersimpan di DB. Pemakaian ulang token lama mencabut seluruh keluarga sesi.
+- `helmet`, rate limit (umum, login/daftar, dan endpoint tulis publik), batas ukuran body, dan bcrypt cost 12.
+- `sort` dan `limit` di-*whitelist* (maks 50). Pengguna yang diblokir langsung kehilangan akses.
+- Log audit internal menyamarkan field sensitif.
 
-### 1. Prasyarat
-Pastikan Anda sudah menginstal:
-- **Node.js** (v18 atau lebih baru)
-- **NPM**
-- **PostgreSQL** yang berjalan (bisa menggunakan Docker atau instalasi lokal/Caprover)
+## Menjalankan secara lokal
 
-### 2. Konfigurasi Environment Variables
-Salin file `.env.example` menjadi `.env` di folder ini:
 ```bash
-cp .env.example .env
-```
-Sesuaikan nilai `DATABASE_URL` dengan koneksi PostgreSQL Anda. Contoh:
-```env
-DATABASE_URL="postgresql://username:password@localhost:5432/nic?schema=public"
+docker run -d --name sampaimana-devdb -e POSTGRES_USER=sm -e POSTGRES_PASSWORD=sm \
+  -e POSTGRES_DB=sampaimana -p 127.0.0.1:55432:5432 postgres:16-alpine
+
+cp .env.example .env               # isi JWT_SECRET: openssl rand -hex 32
+pnpm install
+pnpm migrate:deploy                # terapkan migrasi
+SEED_ADMIN_EMAIL=admin@local.test SEED_ADMIN_PASSWORD='ganti-dengan-12+karakter' SEED_DEMO=true pnpm seed
+pnpm dev                           # http://localhost:5000/api/docs
 ```
 
-### 3. Instal Dependencies
-Jalankan perintah berikut di folder backend:
+Untuk perubahan skema, ubah `prisma/schema.prisma` lalu jalankan `pnpm migrate:dev --name <nama>`. Jangan pakai `db push`.
+
+Seed bersifat idempoten dan **tidak pernah menghapus data**. Seed memastikan kategori dasar ada, membuat SUPER_ADMIN dari env bila belum ada, dan mengisi kasus demo hanya bila `SEED_DEMO=true` dan tabel kasus masih kosong.
+
+## Test
+
 ```bash
-npm install
+docker exec sampaimana-devdb psql -U sm -c "CREATE DATABASE sampaimana_test"
+pnpm test
 ```
 
-### 4. Setup Database & Prisma
-Jalankan migrasi database untuk membuat tabel di PostgreSQL:
-```bash
-# Push skema ke database & generate Prisma Client
-npx prisma db push
-```
+Test memakai Postgres sungguhan (`TEST_DATABASE_URL`, nama DB harus mengandung `test`). Cakupannya: alur auth dan rotasi token, RBAC, sinkronisasi tahapan dan status, notifikasi, validasi file, moderasi, koreksi, dan ekspor.
 
-### 5. Jalankan Seed Data Awal
-Tanam data mock awal (kategori, pengguna admin, kontributor, dan beberapa kasus contoh):
-```bash
-npm run prisma:seed
-```
+## Dokumentasi API
 
-### 6. Jalankan Server Development
-Jalankan server dalam mode development (dengan reload otomatis menggunakan nodemon):
-```bash
-npm run dev
-```
-Server akan berjalan di http://localhost:5000.
+Swagger UI ada di `/api/docs`, dan spesifikasi mentahnya di `/api/openapi.json`.
 
----
+## Deploy
 
-## 📖 Dokumentasi API (Swagger UI)
-
-Setelah server berjalan, Anda dapat mengakses dokumentasi API lengkap yang interaktif di:
-👉 **[http://localhost:5000/api-docs](http://localhost:5000/api-docs)**
-
-Di sana, Anda dapat menguji seluruh endpoint secara langsung (termasuk alur Login, Registrasi, CRUD Kasus, Moderasi, dan Pengiriman Kontribusi).
-
----
-
-## 🔐 Akun Uji Coba Default (Dari Seeder)
-
-1. **Super Admin**:
-   - Email: `jan@hallojanu.xyz`
-   - Password: `admin12345`
-   - Izin: Akses penuh CRUD, moderasi kontribusi publik, manajemen user & log aktivitas.
-
-2. **Kontributor Publik**:
-   - Email: `budi@hallojanu.xyz`
-   - Password: `kontri123`
-   - Izin: Mengajukan kontribusi progress kasus, melihat riwayat kontribusi pribadi.
+Image Docker menjalankan `prisma migrate deploy` lalu seed (idempoten) sebelum start. Upload disimpan di `/data/uploads`, jadi pasang volume. Cara deploy ke server ada di `deploy/` pada repo web.

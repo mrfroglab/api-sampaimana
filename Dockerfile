@@ -1,24 +1,26 @@
-FROM node:20-bullseye-slim
-
+# syntax=docker/dockerfile:1.7
+FROM node:22-bookworm-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+FROM base AS deps
+COPY package.json pnpm-lock.yaml ./
+COPY prisma ./prisma
+RUN pnpm install --frozen-lockfile --prod --ignore-scripts \
+ && pnpm exec prisma generate
 
-# Copy Prisma schema first for caching
-COPY prisma ./prisma/
-
-# Install dependencies (including production and devDependencies needed for build)
-RUN npm ci
-
-# Generate Prisma Client
-RUN npx prisma generate
-
-# Copy the rest of the application files
-COPY . .
-
-# Expose port
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY package.json ./
+COPY prisma ./prisma
+COPY src ./src
+COPY docker-entrypoint.sh ./
+RUN mkdir -p /data/uploads && chown node:node /data/uploads /app && chmod +x docker-entrypoint.sh
+USER node
+ENV UPLOAD_DIR=/data/uploads PORT=5000
 EXPOSE 5000
-
-# Start the application
-CMD ["npm", "start"]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||5000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["./docker-entrypoint.sh"]
