@@ -16,6 +16,10 @@ const schema = z
     TRUST_PROXY: z.coerce.number().int().min(0).default(1),
     SMTP_URL: z.string().optional(),
     MAIL_FROM: z.string().default('Sampai Mana <no-reply@sampaimana.local>'),
+    // Cases with no activity for this many days show up as "stale" in the editorial attention list.
+    STALE_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    // Daily editorial digest. Defaults to on in production only.
+    REMINDERS_ENABLED: z.enum(['true', 'false']).optional(),
     RATE_LIMIT_DISABLED: z
       .enum(['true', 'false'])
       .default('false')
@@ -44,6 +48,7 @@ const parseEnv = (source) => {
     : ['http://localhost:5173', 'http://localhost:3000'];
   env.isProd = env.NODE_ENV === 'production';
   env.isTest = env.NODE_ENV === 'test';
+  env.REMINDERS_ENABLED = env.REMINDERS_ENABLED === undefined ? env.isProd : env.REMINDERS_ENABLED === 'true';
   return { env };
 };
 

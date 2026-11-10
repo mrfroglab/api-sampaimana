@@ -8,7 +8,7 @@ const api = () => request(app);
 const TABLES = [
   'notifications', 'follows', 'correction_requests', 'case_revisions', 'sources', 'articles',
   'case_contributions', 'case_stages', 'defendants', 'cases', 'categories', 'refresh_tokens',
-  'activity_logs', 'users',
+  'activity_logs', 'job_runs', 'users',
 ];
 
 const resetDb = () => prisma.$executeRawUnsafe(`TRUNCATE ${TABLES.map((t) => `"${t}"`).join(', ')} CASCADE`);

@@ -188,7 +188,7 @@ async function seedDemo(admin) {
           filedAt: d(demo.stages[0][1]),
           lastActivityAt: lastActivity,
           createdAt: d(demo.stages[0][1]),
-          defendants: { create: demo.defendants },
+          defendants: { create: demo.defendants.map((x) => ({ ...x, slug: slugify(x.name) || 'pihak' })) },
         },
       });
       for (const [i, [stageType, start, end, title, content]] of demo.stages.entries()) {
