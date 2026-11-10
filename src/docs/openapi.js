@@ -96,6 +96,92 @@ module.exports = {
           followerCount: { type: 'integer' },
         },
       },
+      CaseListItem: {
+        allOf: [
+          ref('CaseSummary'),
+          {
+            type: 'object',
+            properties: {
+              court: { type: ['string', 'null'] },
+              region: { type: ['string', 'null'] },
+              defendants: {
+                type: 'array',
+                items: { type: 'object', properties: { name: { type: 'string' }, slug: { type: 'string' }, role: { type: 'string' } } },
+              },
+              sourceCount: { type: 'integer' },
+              stageCount: { type: 'integer' },
+            },
+          },
+        ],
+      },
+      SippParsed: {
+        type: 'object',
+        description: 'Hasil pembacaan halaman SIPP. Semua field bisa null/kosong bila tidak ditemukan.',
+        properties: {
+          caseNumber: { type: ['string', 'null'] },
+          court: { type: ['string', 'null'], example: 'PN Jakarta Pusat' },
+          classification: { type: ['string', 'null'] },
+          registeredAt: { type: ['string', 'null'], format: 'date' },
+          statusText: { type: ['string', 'null'], example: 'Persidangan' },
+          parties: { type: 'array', items: { type: 'object', properties: { role: { type: 'string', example: 'Terdakwa' }, name: { type: 'string' } } } },
+          schedule: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                date: { type: 'string', format: 'date' },
+                time: { type: ['string', 'null'], example: '09:30' },
+                agenda: { type: ['string', 'null'] },
+                room: { type: ['string', 'null'] },
+              },
+            },
+          },
+          verdictDate: { type: ['string', 'null'], format: 'date' },
+          verdictSummary: { type: ['string', 'null'] },
+          warnings: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      SippProposal: {
+        type: 'object',
+        properties: {
+          stageType: ref('CaseStatus'),
+          status: { type: 'string', enum: ['PENDING', 'AKTIF', 'SELESAI'] },
+          title: { type: 'string' },
+          summary: { type: 'string' },
+          startedAt: { type: 'string', format: 'date-time' },
+          dueAt: { type: ['string', 'null'], format: 'date-time' },
+          key: { type: 'string', description: 'Hash stabil (tipe + hari mulai + hari tenggat) untuk memilih usulan.' },
+        },
+      },
+      AttentionItem: {
+        type: 'object',
+        properties: {
+          case: {
+            type: 'object',
+            properties: { id: { type: 'string' }, slug: { type: 'string' }, title: { type: 'string' }, caseNumber: { type: 'string' }, currentStatus: ref('CaseStatus') },
+          },
+          stage: {
+            type: ['object', 'null'],
+            properties: { id: { type: 'string' }, stageType: ref('CaseStatus'), startedAt: { type: 'string', format: 'date-time' }, dueAt: { type: ['string', 'null'], format: 'date-time' } },
+          },
+          days: { type: 'integer', description: 'overdue: hari terlambat; dueSoon: hari tersisa; stale: hari sejak aktivitas terakhir.' },
+        },
+      },
+      TrendGroup: {
+        type: 'object',
+        properties: {
+          key: { type: 'string' },
+          slug: { type: 'string' },
+          label: { type: 'string' },
+          cases: { type: 'integer' },
+          decided: { type: 'integer' },
+          ongoing: { type: 'integer' },
+          medianDaysToDecision: { type: ['number', 'null'] },
+          avgDaysToDecision: { type: ['number', 'null'] },
+          medianDaysPerStage: { type: 'object', additionalProperties: { type: ['number', 'null'] }, description: 'Kunci: PELAPORAN … PUTUSAN.' },
+          longestOpenDays: { type: ['integer', 'null'] },
+        },
+      },
       Revision: {
         type: 'object',
         properties: {
@@ -112,6 +198,63 @@ module.exports = {
     '/api/health': { get: op('Publik', 'Cek kesehatan API dan database') },
     '/api/categories': { get: op('Publik', 'Daftar kategori beserta jumlah kasus') },
     '/api/stats': { get: op('Publik', 'Statistik publik: status, kategori, durasi tahapan, pembaruan terbaru') },
+    '/api/stats/trends': {
+      get: op('Publik', 'Tren dan durasi per lembaga/pengadilan/wilayah/kategori (cache 5 menit)', {
+        parameters: [query('groupBy', { type: 'string', enum: ['institution', 'court', 'region', 'category'], default: 'institution' })],
+        description:
+          'Hari menuju putusan = tahapan pertama (atau filedAt) → tahapan PUTUSAN pertama. Durasi per tahapan = startedAt → endedAt (atau awal tahapan berikutnya). Diurutkan menurut median hari menuju putusan (terbesar dulu, null terakhir); hanya kelompok yang tidak kosong.',
+        responses: { 200: json(envelope({ type: 'object', properties: { groupBy: { type: 'string' }, groups: { type: 'array', items: ref('TrendGroup') } } })) },
+      }),
+    },
+    '/api/people/{slug}': {
+      get: op('Publik', 'Halaman pihak: semua kasus aktif yang memuat pihak bernama sama', {
+        parameters: [pathParam('slug', 'slug dari nama pihak, mis. budi-santoso')],
+        responses: {
+          200: json(envelope({ type: 'object', properties: { name: { type: 'string' }, slug: { type: 'string' }, roles: { type: 'array', items: { type: 'string' } }, cases: { type: 'array', items: ref('CaseListItem') } } })),
+          404: json({ type: 'object' }, 'Tidak ada kasus aktif untuk slug ini'),
+        },
+      }),
+    },
+    '/api/institutions': {
+      get: op('Publik', 'Daftar lembaga (Case.institution) beserta jumlah kasus aktif', {
+        responses: { 200: json(envelope({ type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, slug: { type: 'string' }, cases: { type: 'integer' } } } })) },
+      }),
+    },
+    '/api/institutions/{slug}': {
+      get: op('Publik', 'Halaman lembaga: statistik dan kasus aktif', {
+        parameters: [pathParam('slug')],
+        responses: {
+          200: json(
+            envelope({
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                slug: { type: 'string' },
+                stats: { type: 'object', properties: { cases: { type: 'integer' }, decided: { type: 'integer' }, ongoing: { type: 'integer' }, medianDaysToDecision: { type: ['number', 'null'] } } },
+                cases: { type: 'array', items: ref('CaseListItem') },
+              },
+            }),
+          ),
+          404: json({ type: 'object' }, 'Lembaga tidak ditemukan'),
+        },
+      }),
+    },
+    '/api/sitemap-data': {
+      get: op('Publik', 'Slug untuk sitemap situs web', {
+        responses: {
+          200: json(
+            envelope({
+              type: 'object',
+              properties: {
+                cases: { type: 'array', items: { type: 'object', properties: { slug: { type: 'string' }, updatedAt: { type: 'string', format: 'date-time' } } } },
+                people: { type: 'array', items: { type: 'object', properties: { slug: { type: 'string' } } } },
+                institutions: { type: 'array', items: { type: 'object', properties: { slug: { type: 'string' } } } },
+              },
+            }),
+          ),
+        },
+      }),
+    },
     '/api/cases': {
       get: op('Publik', 'Cari dan saring kasus', {
         parameters: [
@@ -121,13 +264,13 @@ module.exports = {
           query('sort', { type: 'string', enum: ['updated', 'newest', 'oldest', 'title'] }),
           ...pageParams,
         ],
-        responses: { 200: json(envelope({ type: 'array', items: ref('CaseSummary') })) },
+        responses: { 200: json(envelope({ type: 'array', items: ref('CaseListItem') })) },
       }),
     },
     '/api/cases/export.csv': { get: op('Data terbuka', 'Unduh seluruh kasus aktif sebagai CSV') },
     '/api/cases/export.json': { get: op('Data terbuka', 'Unduh seluruh kasus aktif, tahapan, dan sumber sebagai JSON') },
     '/api/cases/{key}': {
-      get: op('Publik', 'Detail kasus (key = slug atau id)', { parameters: [pathParam('key', 'Slug atau UUID kasus')] }),
+      get: op('Publik', 'Detail kasus (key = slug atau id); memuat `sippUrl` dan `defendants[].slug`', { parameters: [pathParam('key', 'Slug atau UUID kasus')] }),
     },
     '/api/cases/{key}/revisions': {
       get: op('Publik', 'Riwayat perubahan publik', { parameters: [pathParam('key'), ...pageParams] }),
@@ -199,13 +342,63 @@ module.exports = {
       }),
     },
     '/api/admin/overview': { get: op('Redaksi', 'Ringkasan antrean moderasi, koreksi, dan tenggat terlewat', { security: secured }) },
+    '/api/admin/attention': {
+      get: op('Redaksi', 'Yang perlu perhatian redaksi: tahapan lewat tenggat, jatuh tempo ≤ 7 hari, dan kasus menggantung (STALE_DAYS)', {
+        security: secured,
+        responses: {
+          200: json(
+            envelope({
+              type: 'object',
+              properties: { overdue: { type: 'array', items: ref('AttentionItem') }, dueSoon: { type: 'array', items: ref('AttentionItem') }, stale: { type: 'array', items: ref('AttentionItem') } },
+            }),
+          ),
+        },
+      }),
+    },
+    '/api/admin/cases/{id}/sipp/preview': {
+      post: op('Redaksi', 'Impor SIPP: baca teks/HTML halaman "Detil Perkara" yang ditempel dan usulkan tahapan (tanpa menulis data)', {
+        security: secured,
+        parameters: [pathParam('id')],
+        description:
+          'Hanya EDITOR/SUPER_ADMIN, dibatasi rate limit tulis. SIPP dilindungi reCAPTCHA sehingga server tidak mengambil halaman: redaksi menempelkan HTML (simpan halaman / view-source) atau teks hasil salin.',
+        requestBody: body({ type: 'object', required: ['input'], properties: { input: { type: 'string', maxLength: 2097152, description: 'HTML atau teks halaman SIPP (maks 2 MB).' } } }),
+        responses: {
+          200: json(envelope({ type: 'object', properties: { parsed: ref('SippParsed'), proposals: { type: 'array', items: ref('SippProposal') }, warnings: { type: 'array', items: { type: 'string' } } } })),
+        },
+      }),
+    },
+    '/api/admin/cases/{id}/sipp/apply': {
+      post: op('Redaksi', 'Impor SIPP: buat tahapan terpilih (lewat jalur "tambah tahapan" yang sama) dan simpan tautan SIPP', {
+        security: secured,
+        parameters: [pathParam('id')],
+        description:
+          'Server membaca ulang `input` dan hanya membuat usulan yang `key`-nya ada di `keys`. Sinkronisasi tahapan aktif/status, revisi (`STAGE_ADDED`, `STATUS_CHANGED`, dan `SIPP_IMPORT`) serta notifikasi pengikut berjalan seperti biasa. Key yang tidak lagi berlaku (mis. sudah diimpor) → 400.',
+        requestBody: body({
+          type: 'object',
+          required: ['input', 'keys'],
+          properties: { input: { type: 'string', maxLength: 2097152 }, keys: { type: 'array', items: { type: 'string' } }, sippUrl: { type: 'string', format: 'uri' } },
+        }),
+        responses: {
+          200: json(
+            envelope({
+              type: 'object',
+              properties: {
+                created: { type: 'array', items: ref('Stage') },
+                case: { type: 'object', properties: { id: { type: 'string' }, slug: { type: 'string' }, currentStatus: ref('CaseStatus') } },
+              },
+            }),
+          ),
+          400: json({ type: 'object' }, 'Input/keys/sippUrl tidak valid'),
+        },
+      }),
+    },
     '/api/admin/cases': {
       get: op('Redaksi', 'Daftar kasus (termasuk arsip)', { security: secured }),
-      post: op('Redaksi', 'Buat kasus', { security: secured }),
+      post: op('Redaksi', 'Buat kasus (opsional `sippUrl`, http/https)', { security: secured }),
     },
     '/api/admin/cases/{id}': {
       get: op('Redaksi', 'Detail kasus untuk penyuntingan', { security: secured, parameters: [pathParam('id')] }),
-      put: op('Redaksi', 'Perbarui kasus (perubahan status wajib disertai alasan)', { security: secured, parameters: [pathParam('id')] }),
+      put: op('Redaksi', 'Perbarui kasus (perubahan status wajib disertai alasan; `sippUrl` dikosongkan dengan "" atau null, dipertahankan bila tidak dikirim)', { security: secured, parameters: [pathParam('id')] }),
       delete: op('Redaksi', 'Arsipkan kasus', { security: secured, parameters: [pathParam('id')] }),
     },
     '/api/admin/cases/{id}/restore': { post: op('Redaksi', 'Pulihkan kasus dari arsip', { security: secured, parameters: [pathParam('id')] }) },

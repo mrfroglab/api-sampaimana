@@ -14,6 +14,10 @@ Node.js 22 · Express 5 · Prisma 6 · PostgreSQL 16 · Zod 4 · Vitest
 - **Hak jawab dan koreksi.** Formulir publik tanpa login, dibatasi rate limit dan dilengkapi honeypot. Catatan koreksi bisa ditampilkan di riwayat kasus.
 - **Data terbuka.** `GET /api/cases/export.csv` dan `export.json` (CC BY 4.0). CSV aman dari *formula injection*.
 - **Statistik.** Rata-rata dan median durasi tiap tahapan, kasus aktif terlama, dan pembaruan terbaru.
+- **Impor semi-otomatis dari SIPP.** SIPP (`sipp.pn-*.go.id`) dilindungi reCAPTCHA, jadi API **tidak** mengambil atau mem-bypass halamannya. Redaksi membuka halaman *Detil Perkara* di browser sendiri, menyalin HTML (simpan halaman / view-source) atau teks (select all), lalu menempelkannya di panel admin. Parser berbasis label (`src/lib/sipp.js`, toleran terhadap perubahan tata letak) membaca nomor perkara, pengadilan, klasifikasi, tanggal pendaftaran, status, pihak, tabel *Jadwal Sidang*, dan tanggal/amar putusan, lalu mengusulkan tahapan: pendaftaran → tahapan PERSIDANGAN aktif (jadwal sidang berikutnya menjadi `dueAt`) dan putusan → tahapan PUTUSAN. Usulan yang menduplikasi tahapan yang ada (jenis sama, hari mulai sama) dibuang. `POST /api/admin/cases/:id/sipp/preview` tidak menulis apa pun; `.../sipp/apply` membuat usulan terpilih lewat jalur "tambah tahapan" yang sama (sinkronisasi status, revisi `SIPP_IMPORT`, notifikasi pengikut) dan menyimpan `sippUrl`. Hanya EDITOR/SUPER_ADMIN; teks maksimal 2 MB.
+- **Perhatian redaksi dan pengingat harian.** `GET /api/admin/attention` menampilkan tahapan aktif yang lewat tenggat, yang jatuh tempo dalam 7 hari, dan kasus aktif tanpa aktivitas lebih dari `STALE_DAYS` hari. Pekerjaan harian di proses API (`src/jobs/scheduler.js`, dijalankan setelah 07:00 WIB) mengirim ringkasan ke setiap EDITOR dan SUPER_ADMIN sebagai notifikasi (`EDITORIAL_REMINDER`, tautan `/redaksi`) dan email bila SMTP aktif; tidak mengirim bila ketiga daftar kosong. Aman dijalankan di banyak instance: `pg_try_advisory_lock` plus tabel `job_runs` (unik per nama dan tanggal) menjamin hanya satu pengiriman per hari. Diatur oleh `REMINDERS_ENABLED`.
+- **Tren dan durasi.** `GET /api/stats/trends?groupBy=institution|court|region|category` memberi median/rata-rata hari menuju putusan, median hari per tahapan, dan kasus terbuka terlama per kelompok (cache memori 5 menit, dibersihkan saat ada perubahan dari admin). Hitungan ada di `src/lib/durations.js`.
+- **Halaman pihak dan lembaga (SEO).** `GET /api/people/:slug`, `GET /api/institutions`, `GET /api/institutions/:slug`, dan `GET /api/sitemap-data` untuk sitemap situs web. Tiap pihak punya `slug` (bukan unik: orang yang sama bisa muncul di beberapa kasus) yang tampil di `defendants[].slug` pada detail kasus.
 
 ## Keamanan
 
@@ -43,13 +47,23 @@ Seed bersifat idempoten dan **tidak pernah menghapus data**. Seed memastikan kat
 ## Test
 
 ```bash
-pnpm test:unit          # 62 unit test, tanpa database (juga jalan di pre-commit)
+pnpm test:unit          # 119 unit test, tanpa database (juga jalan di pre-commit)
 pnpm test:coverage      # unit test + laporan coverage
-pnpm test:integration   # 23 test HTTP + Postgres sungguhan, butuh TEST_DATABASE_URL
+pnpm test:integration   # 50 test HTTP + Postgres sungguhan, butuh TEST_DATABASE_URL
 ```
 
-- **Unit** (`test/unit`) menguji validasi env, slug, deteksi file dari *magic bytes*, pengaman path traversal, pemetaan error, paginasi, RBAC, token JWT, penyamaran log audit, escape CSV, filter pencarian, dan bypass rate limit internal.
-- **Integration** (`test/integration`) menguji alur auth dan rotasi token, RBAC, sinkronisasi tahapan dan status, notifikasi, unggahan, moderasi, koreksi, dan ekspor. Test ini memakai DB yang namanya harus mengandung `test`; migrasi diterapkan dengan `migrate deploy` dan data dibersihkan dengan `TRUNCATE`.
+- **Unit** (`test/unit`) menguji parser SIPP (fixture HTML dan teks di `test/fixtures/sipp`), usulan tahapan, hitungan durasi, seleksi pengingat harian, validasi env, slug, deteksi file dari *magic bytes*, pengaman path traversal, pemetaan error, paginasi, RBAC, token JWT, penyamaran log audit, escape CSV, filter pencarian, dan bypass rate limit internal.
+- **Integration** (`test/integration`) menguji alur auth dan rotasi token, RBAC, sinkronisasi tahapan dan status, notifikasi, unggahan, moderasi, koreksi, ekspor, impor SIPP, perhatian redaksi dan pengingat harian, tren, serta halaman pihak dan lembaga. Test ini memakai DB yang namanya harus mengandung `test`; migrasi diterapkan dengan `migrate deploy` dan data dibersihkan dengan `TRUNCATE`.
+
+## Konfigurasi opsional
+
+| Env | Default | Fungsi |
+| --- | --- | --- |
+| `REMINDERS_ENABLED` | `true` di production, selain itu `false` | Menyalakan pengingat redaksi harian di proses API. |
+| `STALE_DAYS` | `30` | Kasus aktif tanpa aktivitas selama ini dianggap menggantung. |
+| `SMTP_URL` | kosong | Bila diisi, pengingat dan notifikasi juga dikirim lewat email. |
+
+Daftar lengkap ada di `.env.example`.
 
 ## CI/CD
 
