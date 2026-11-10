@@ -322,7 +322,7 @@ module.exports = {
       }),
     },
     '/api/auth/login': {
-      post: op('Autentikasi', 'Masuk; mengembalikan accessToken dan memasang cookie refresh', {
+      post: op('Autentikasi', 'Masuk; mengembalikan accessToken + cookie refresh, atau { mfaRequired, mfaTicket } bila 2FA aktif. Akun dikunci sementara setelah banyak gagal.', {
         requestBody: body({ type: 'object', required: ['email', 'password'], properties: { email: { type: 'string' }, password: { type: 'string' } } }),
       }),
     },
@@ -333,6 +333,19 @@ module.exports = {
       patch: op('Autentikasi', 'Ubah nama / preferensi notifikasi email', { security: secured }),
     },
     '/api/auth/password': { post: op('Autentikasi', 'Ganti kata sandi (mengeluarkan perangkat lain)', { security: secured }) },
+    '/api/auth/config': { get: op('Autentikasi', 'Pengaturan publik: pendaftaran dibuka? kunci situs Turnstile') },
+    '/api/auth/login/2fa': {
+      post: op('Autentikasi', 'Langkah kedua masuk: mfaTicket dari /login + kode 6 digit atau kode pemulihan', {
+        requestBody: body({ type: 'object', required: ['mfaTicket', 'code'], properties: { mfaTicket: { type: 'string' }, code: { type: 'string' } } }),
+      }),
+    },
+    '/api/auth/sessions': { get: op('Autentikasi', 'Perangkat yang sedang masuk', { security: secured }) },
+    '/api/auth/sessions/{id}': { delete: op('Autentikasi', 'Keluarkan satu perangkat', { security: secured }) },
+    '/api/auth/sessions/revoke-others': { post: op('Autentikasi', 'Keluarkan semua perangkat lain', { security: secured }) },
+    '/api/auth/2fa/setup': { post: op('Autentikasi', 'Mulai verifikasi dua langkah (butuh kata sandi); kembalikan QR', { security: secured }) },
+    '/api/auth/2fa/enable': { post: op('Autentikasi', 'Aktifkan dengan kode dari aplikasi; kembalikan kode pemulihan', { security: secured }) },
+    '/api/auth/2fa/disable': { post: op('Autentikasi', 'Matikan (butuh kata sandi + kode)', { security: secured }) },
+    '/api/auth/2fa/recovery-codes': { post: op('Autentikasi', 'Buat ulang kode pemulihan (butuh kata sandi + kode)', { security: secured }) },
     '/api/me/follows': { get: op('Akun', 'Kasus yang diikuti', { security: secured }) },
     '/api/me/notifications': { get: op('Akun', 'Notifikasi', { security: secured, parameters: pageParams }) },
     '/api/me/notifications/read': { post: op('Akun', 'Tandai notifikasi dibaca (semua bila ids kosong)', { security: secured }) },
@@ -446,7 +459,7 @@ module.exports = {
       delete: op('Redaksi', 'Hapus kategori yang tidak dipakai', { security: secured, parameters: [pathParam('id')] }),
     },
     '/api/admin/users': { get: op('Redaksi', 'Daftar pengguna (SUPER_ADMIN)', { security: secured }) },
-    '/api/admin/users/{id}': { patch: op('Redaksi', 'Ubah peran atau blokir pengguna (SUPER_ADMIN)', { security: secured, parameters: [pathParam('id')] }) },
+    '/api/admin/users/{id}': { patch: op('Redaksi', 'Ubah peran, blokir, buka kunci (unlock) atau reset verifikasi dua langkah (reset2fa) pengguna (SUPER_ADMIN)', { security: secured, parameters: [pathParam('id')] }) },
     '/api/admin/activity-logs': { get: op('Redaksi', 'Log audit internal', { security: secured, parameters: pageParams }) },
   },
 };

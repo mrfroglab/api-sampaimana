@@ -42,7 +42,9 @@ const errorHandler = (err, req, res, next) => {
     });
   }
   if (err instanceof HttpError) {
-    return res.status(err.status).json({ success: false, message: err.message, details: err.details });
+    // An array of { path, message } is a field error list, the same shape as validation errors.
+    const fields = Array.isArray(err.details) ? { errors: err.details } : { details: err.details };
+    return res.status(err.status).json({ success: false, message: err.message, ...fields });
   }
   if (err instanceof multer.MulterError) {
     const message =
