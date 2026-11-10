@@ -64,6 +64,14 @@ model User {
   role                  Role                @default(CONTRIBUTOR)
   bannedAt              DateTime?
   emailNotifications    Boolean             @default(true)
+  // Account lockout after repeated failed sign-ins
+  failedLogins          Int                 @default(0)
+  lockedUntil           DateTime?
+  // Two-factor sign-in (TOTP). The secret is AES-GCM encrypted; recovery codes are SHA-256 hashes.
+  totpSecret            String?
+  totpEnabledAt         DateTime?
+  totpLastStep          Int?
+  recoveryCodes         String[]            @default([])
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
   stagesCreated         CaseStage[]         @relation("StageCreator")

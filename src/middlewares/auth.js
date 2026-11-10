@@ -2,7 +2,16 @@ const prisma = require('../lib/prisma');
 const { verifyAccessToken } = require('../lib/tokens');
 const { unauthorized, forbidden } = require('../lib/http');
 
-const userSelect = { id: true, email: true, name: true, role: true, bannedAt: true, emailNotifications: true, createdAt: true };
+const userSelect = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  bannedAt: true,
+  emailNotifications: true,
+  createdAt: true,
+  totpEnabledAt: true,
+};
 
 const readBearer = (req) => {
   const header = req.headers.authorization;

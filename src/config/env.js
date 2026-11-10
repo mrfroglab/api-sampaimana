@@ -20,6 +20,19 @@ const schema = z
     STALE_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
     // Daily editorial digest. Defaults to on in production only.
     REMINDERS_ENABLED: z.enum(['true', 'false']).optional(),
+    // Public sign-up. "false" = only existing accounts can sign in (accounts are made by an admin).
+    REGISTRATION_OPEN: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    // Cloudflare Turnstile on sign-up. Both keys set = on; empty = off.
+    TURNSTILE_SITE_KEY: z.string().optional(),
+    TURNSTILE_SECRET_KEY: z.string().optional(),
+    // Reject passwords found in public breaches (Have I Been Pwned, k-anonymity). Off in tests.
+    PWNED_CHECK: z.enum(['true', 'false']).optional(),
+    // Failed sign-ins per account before it is locked, and for how long.
+    LOGIN_MAX_FAILURES: z.coerce.number().int().min(3).max(100).default(10),
+    LOGIN_LOCK_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
     RATE_LIMIT_DISABLED: z
       .enum(['true', 'false'])
       .default('false')
@@ -49,6 +62,11 @@ const parseEnv = (source) => {
   env.isProd = env.NODE_ENV === 'production';
   env.isTest = env.NODE_ENV === 'test';
   env.REMINDERS_ENABLED = env.REMINDERS_ENABLED === undefined ? env.isProd : env.REMINDERS_ENABLED === 'true';
+  env.PWNED_CHECK = env.PWNED_CHECK === undefined ? !env.isTest : env.PWNED_CHECK === 'true';
+  if (!env.TURNSTILE_SITE_KEY || !env.TURNSTILE_SECRET_KEY) {
+    env.TURNSTILE_SITE_KEY = undefined;
+    env.TURNSTILE_SECRET_KEY = undefined;
+  }
   return { env };
 };
 

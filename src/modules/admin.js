@@ -823,7 +823,7 @@ router.get('/users', superOnly, async (req, res) => {
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
-      select: { id: true, name: true, email: true, role: true, bannedAt: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, bannedAt: true, createdAt: true, totpEnabledAt: true, lockedUntil: true },
     }),
   ]);
   const stats = users.length
@@ -845,7 +845,14 @@ router.get('/users', superOnly, async (req, res) => {
 
 router.patch('/users/:id', superOnly, async (req, res) => {
   const data = parse(
-    z.object({ role: z.enum(['SUPER_ADMIN', 'EDITOR', 'VIEWER', 'CONTRIBUTOR']).optional(), banned: z.boolean().optional() }),
+    z.object({
+      role: z.enum(['SUPER_ADMIN', 'EDITOR', 'VIEWER', 'CONTRIBUTOR']).optional(),
+      banned: z.boolean().optional(),
+      // For a user who lost their authenticator and recovery codes.
+      reset2fa: z.literal(true).optional(),
+      // Lifts a lock from repeated failed sign-ins.
+      unlock: z.literal(true).optional(),
+    }),
     req.body,
   );
   if (req.params.id === req.user.id) throw forbidden('Anda tidak dapat mengubah peran atau status akun sendiri.');
@@ -856,10 +863,12 @@ router.patch('/users/:id', superOnly, async (req, res) => {
     data: {
       ...(data.role ? { role: data.role } : {}),
       ...(data.banned === undefined ? {} : { bannedAt: data.banned ? new Date() : null }),
+      ...(data.reset2fa ? { totpSecret: null, totpEnabledAt: null, totpLastStep: null, recoveryCodes: [] } : {}),
+      ...(data.unlock ? { failedLogins: 0, lockedUntil: null } : {}),
     },
-    select: { id: true, name: true, email: true, role: true, bannedAt: true },
+    select: { id: true, name: true, email: true, role: true, bannedAt: true, totpEnabledAt: true, lockedUntil: true },
   });
-  if (data.banned || (data.role && data.role !== target.role)) await revokeAllForUser(target.id);
+  if (data.banned || data.reset2fa || (data.role && data.role !== target.role)) await revokeAllForUser(target.id);
   audit(req, 'UPDATE_USER', 'User', target.id, data);
   return ok(res, user, { message: 'Pengguna diperbarui.' });
 });

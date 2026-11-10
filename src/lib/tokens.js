@@ -86,6 +86,7 @@ const refreshCookieOptions = () => ({
 
 module.exports = {
   REFRESH_COOKIE,
+  hashToken: sha256,
   signAccessToken,
   verifyAccessToken,
   issueRefreshToken,
