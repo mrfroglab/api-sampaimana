@@ -48,7 +48,7 @@ const buildWhere = ({ q, status, category }) => {
 
 const listInclude = {
   category: { select: { id: true, name: true, slug: true, color: true } },
-  defendants: { select: { name: true, role: true }, orderBy: { createdAt: 'asc' } },
+  defendants: { select: { name: true, slug: true, role: true }, orderBy: { createdAt: 'asc' } },
   stages: {
     where: { status: 'AKTIF' },
     orderBy: { startedAt: 'desc' },
@@ -263,3 +263,5 @@ module.exports = router;
 module.exports.findCaseKey = findCaseKey;
 module.exports.csvCell = csvCell;
 module.exports.buildWhere = buildWhere;
+module.exports.listInclude = listInclude;
+module.exports.toListItem = toListItem;
