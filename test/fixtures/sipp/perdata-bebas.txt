@@ -1,0 +1,13 @@
+Sistem Informasi Penelusuran Perkara
+PN Medan
+
+Nomor Perkara: 301/Pdt.G/2025/PN Mdn
+Tanggal Pendaftaran: 3 Maret 2025
+Klasifikasi Perkara: Wanprestasi
+Penggugat: CV Karya Mandiri
+Tergugat: PT Bank Sumatera Utama
+Status Perkara: Persidangan
+
+Jadwal Sidang
+1 Senin, 17 Mar. 2025 09:00 Pembacaan Gugatan Ruang Sidang Cakra
+2 Senin, 01 Des. 2099 10.30 Jawaban Tergugat Ruang Sidang Cakra
