@@ -15,24 +15,40 @@ const MAX_CASES = 100;
 
 const trendsSchema = z.object({ groupBy: z.enum(GROUP_BY).default('institution') });
 
-const durationRows = () =>
-  prisma.case.findMany({
-    where: { isActive: true },
-    select: {
-      institution: true,
-      court: true,
-      region: true,
-      currentStatus: true,
-      filedAt: true,
-      category: { select: { name: true, slug: true } },
-      stages: { select: { stageType: true, startedAt: true, endedAt: true } },
-    },
-  });
+// A stage counts as verified when at least one verified source is attached to it.
+const stageSelect = {
+  stageType: true,
+  startedAt: true,
+  endedAt: true,
+  sources: { where: { isVerified: true }, select: { id: true }, take: 1 },
+};
+const withVerified = (rows) =>
+  rows.map((c) => ({ ...c, stages: c.stages.map(({ sources, ...s }) => ({ ...s, verified: sources.length > 0 })) }));
+
+const durationRows = async () =>
+  withVerified(
+    await prisma.case.findMany({
+      where: { isActive: true },
+      select: {
+        institution: true,
+        court: true,
+        region: true,
+        currentStatus: true,
+        category: { select: { name: true, slug: true } },
+        stages: { select: stageSelect },
+      },
+    }),
+  );
 
 router.get('/stats/trends', async (req, res) => {
   const { groupBy } = parse(trendsSchema, req.query);
-  const groups = await cached(`trends:${groupBy}`, TRENDS_TTL_MS, async () => buildTrends(await durationRows(), groupBy));
-  return ok(res, { groupBy, groups });
+  const trends = await cached(`trends:${groupBy}`, TRENDS_TTL_MS, async () => buildTrends(await durationRows(), groupBy));
+  return ok(res, {
+    groupBy,
+    // What is measured, so clients can print the methodology next to the numbers.
+    method: { measure: 'PENYIDIKAN_TO_PUTUSAN', unit: 'days', verifiedStagesOnly: true },
+    ...trends,
+  });
 });
 
 /* ---------- institutions ---------- */
@@ -72,16 +88,16 @@ router.get('/institutions/:slug', async (req, res) => {
   const where = { isActive: true, institution: { in: entry.names } };
   const [cases, forStats] = await Promise.all([
     prisma.case.findMany({ where, include: listInclude, orderBy: { lastActivityAt: 'desc' }, take: MAX_CASES }),
-    prisma.case.findMany({
-      where,
-      select: { currentStatus: true, filedAt: true, stages: { select: { stageType: true, startedAt: true, endedAt: true } } },
-    }),
+    prisma.case
+      .findMany({ where, select: { currentStatus: true, stages: { select: stageSelect } } })
+      .then(withVerified),
   ]);
-  const { cases: total, decided, ongoing, medianDaysToDecision } = summarize(forStats);
+  const { cases: total, decided, ongoing, medianDays, samples, lowSample } = summarize(forStats);
   return ok(res, {
     name: entry.name,
     slug: entry.slug,
-    stats: { cases: total, decided, ongoing, medianDaysToDecision },
+    // Median days penyidikan → putusan over verified stages only; null until there are measured cases.
+    stats: { cases: total, decided, ongoing, medianDaysToDecision: medianDays, samples, lowSample },
     cases: cases.map(toListItem),
   });
 });

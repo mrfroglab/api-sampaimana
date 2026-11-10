@@ -169,17 +169,23 @@ module.exports = {
       },
       TrendGroup: {
         type: 'object',
+        description: 'Semua angka durasi dihitung dari tahapan TERVERIFIKASI saja (tahapan yang punya sumber terverifikasi).',
         properties: {
           key: { type: 'string' },
           slug: { type: 'string' },
           label: { type: 'string' },
-          cases: { type: 'integer' },
+          cases: { type: 'integer', description: 'Kasus aktif dalam kelompok.' },
           decided: { type: 'integer' },
           ongoing: { type: 'integer' },
-          medianDaysToDecision: { type: ['number', 'null'] },
-          avgDaysToDecision: { type: ['number', 'null'] },
-          medianDaysPerStage: { type: 'object', additionalProperties: { type: ['number', 'null'] }, description: 'Kunci: PELAPORAN … PUTUSAN.' },
-          longestOpenDays: { type: ['integer', 'null'] },
+          samples: { type: 'integer', description: 'Jumlah kasus yang bisa diukur (PENYIDIKAN dan PUTUSAN sama-sama terverifikasi).' },
+          lowSample: { type: 'boolean', description: 'true bila samples kurang dari minSamples: tampilkan, tetapi jangan diperingkat.' },
+          medianDays: { type: ['number', 'null'], description: 'Median hari penyidikan → putusan.' },
+          avgDays: { type: ['number', 'null'] },
+          minDays: { type: ['number', 'null'] },
+          maxDays: { type: ['number', 'null'] },
+          medianDaysPerStage: { type: 'object', additionalProperties: { type: ['number', 'null'] }, description: 'Kunci: PELAPORAN … PUTUSAN; hanya tahapan terverifikasi.' },
+          verifiedStages: { type: 'integer' },
+          stages: { type: 'integer' },
         },
       },
       Revision: {
@@ -202,8 +208,21 @@ module.exports = {
       get: op('Publik', 'Tren dan durasi per lembaga/pengadilan/wilayah/kategori (cache 5 menit)', {
         parameters: [query('groupBy', { type: 'string', enum: ['institution', 'court', 'region', 'category'], default: 'institution' })],
         description:
-          'Hari menuju putusan = tahapan pertama (atau filedAt) → tahapan PUTUSAN pertama. Durasi per tahapan = startedAt → endedAt (atau awal tahapan berikutnya). Diurutkan menurut median hari menuju putusan (terbesar dulu, null terakhir); hanya kelompok yang tidak kosong.',
-        responses: { 200: json(envelope({ type: 'object', properties: { groupBy: { type: 'string' }, groups: { type: 'array', items: ref('TrendGroup') } } })) },
+          'Hanya tahapan terverifikasi yang dihitung. Ukuran utama: hari dari tahapan PENYIDIKAN terverifikasi paling awal ke tahapan PUTUSAN terverifikasi paling awal pada kasus yang sama. Durasi per tahapan = startedAt → endedAt (atau awal tahapan berikutnya). Urutan: kelompok dengan sampel cukup (>= minSamples) dari yang paling lambat, lalu kelompok bersampel tipis, lalu yang belum bisa diukur. `coverage` menunjukkan berapa kasus dan tahapan yang ikut terukur.',
+        responses: {
+          200: json(
+            envelope({
+              type: 'object',
+              properties: {
+                groupBy: { type: 'string' },
+                method: { type: 'object', properties: { measure: { type: 'string', enum: ['PENYIDIKAN_TO_PUTUSAN'] }, unit: { type: 'string' }, verifiedStagesOnly: { type: 'boolean' } } },
+                minSamples: { type: 'integer' },
+                coverage: { type: 'object', properties: { cases: { type: 'integer' }, measuredCases: { type: 'integer' }, verifiedStages: { type: 'integer' }, stages: { type: 'integer' } } },
+                groups: { type: 'array', items: ref('TrendGroup') },
+              },
+            }),
+          ),
+        },
       }),
     },
     '/api/people/{slug}': {
@@ -230,7 +249,7 @@ module.exports = {
               properties: {
                 name: { type: 'string' },
                 slug: { type: 'string' },
-                stats: { type: 'object', properties: { cases: { type: 'integer' }, decided: { type: 'integer' }, ongoing: { type: 'integer' }, medianDaysToDecision: { type: ['number', 'null'] } } },
+                stats: { type: 'object', properties: { cases: { type: 'integer' }, decided: { type: 'integer' }, ongoing: { type: 'integer' }, medianDaysToDecision: { type: ['number', 'null'], description: 'Median hari penyidikan → putusan (tahapan terverifikasi).' }, samples: { type: 'integer' }, lowSample: { type: 'boolean' } } },
                 cases: { type: 'array', items: ref('CaseListItem') },
               },
             }),

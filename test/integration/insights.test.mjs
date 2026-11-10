@@ -11,21 +11,31 @@ describe('trends, people and institutions', () => {
   let editor;
   const auth = () => ({ Authorization: `Bearer ${editor.token}` });
 
-  /** Makes a case and rewrites its timeline: [[stageType, 'YYYY-MM-DD'], ...]. */
-  const seed = async (overrides, timeline) => {
+  /**
+   * Makes a case and rewrites its timeline: [[stageType, 'YYYY-MM-DD', 'YYYY-MM-DD'?], ...].
+   * Every seeded stage gets a verified source unless `verified: false`; trends only count verified stages.
+   */
+  const seed = async (overrides, timeline, { verified = true } = {}) => {
     const c = await makeCase(editor.token, overrides);
     if (timeline) {
       await prisma.caseStage.deleteMany({ where: { caseId: c.id } });
-      await prisma.caseStage.createMany({
-        data: timeline.map(([stageType, start, end], i) => ({
-          caseId: c.id,
-          stageType,
-          status: i === timeline.length - 1 ? 'AKTIF' : 'SELESAI',
-          startedAt: d(start),
-          endedAt: end ? d(end) : null,
-          createdById: editor.user.id,
-        })),
-      });
+      for (const [i, [stageType, start, end]] of timeline.entries()) {
+        const stage = await prisma.caseStage.create({
+          data: {
+            caseId: c.id,
+            stageType,
+            status: i === timeline.length - 1 ? 'AKTIF' : 'SELESAI',
+            startedAt: d(start),
+            endedAt: end ? d(end) : null,
+            createdById: editor.user.id,
+          },
+        });
+        if (verified) {
+          await prisma.source.create({
+            data: { caseId: c.id, stageId: stage.id, title: 'Sumber resmi', url: 'https://example.go.id/x', type: 'OFFICIAL', isVerified: true, verifiedById: editor.user.id, verifiedAt: new Date() },
+          });
+        }
+      }
       await prisma.case.update({ where: { id: c.id }, data: { currentStatus: timeline.at(-1)[0] } });
     }
     clearInsightsCache();
@@ -40,24 +50,37 @@ describe('trends, people and institutions', () => {
   afterAll(() => prisma.$disconnect());
 
   describe('GET /api/stats/trends', () => {
-    it('groups by institution with durations, sorted by median days to decision', async () => {
-      await seed({ title: 'Kasus KPK Satu', institution: 'KPK' }, [['PENYIDIKAN', '2024-01-01'], ['PENUNTUTAN', '2024-02-01'], ['PERSIDANGAN', '2024-03-01'], ['PUTUSAN', '2024-04-10']]);
-      await seed({ title: 'Kasus KPK Dua', institution: 'KPK' }, [['PENYIDIKAN', '2024-01-01'], ['PUTUSAN', '2024-03-01']]);
-      await seed({ title: 'Kasus Kejagung Satu', institution: 'Kejaksaan Agung' }, [['PENYIDIKAN', '2024-01-01'], ['PUTUSAN', '2024-01-11']]);
-      await seed({ title: 'Kasus Polri Berjalan', institution: 'Polri' }, [['PENYIDIKAN', '2024-01-01']]);
+    const tl = (days) => [['PENYIDIKAN', '2024-01-01'], ['PUTUSAN', new Date(d('2024-01-01').getTime() + days * 86400000).toISOString().slice(0, 10)]];
+
+    it('measures penyidikan → putusan on verified stages, ranks slowest first and reports samples', async () => {
+      for (const days of [90, 100, 110]) await seed({ title: `Kasus KPK ${days}`, institution: 'KPK' }, tl(days));
+      for (const days of [10, 20, 30]) await seed({ title: `Kasus Kejagung ${days}`, institution: 'Kejaksaan Agung' }, tl(days));
+      await seed({ title: 'Kasus Polri Tunggal', institution: 'Polri' }, tl(400)); // one sample: shown, never ranked first
+      await seed({ title: 'Kasus Polri Berjalan', institution: 'Polda' }, [['PENYIDIKAN', '2024-01-01']]); // nothing to measure
       await seed({ title: 'Kasus Tanpa Lembaga', institution: undefined });
 
       const res = await api().get('/api/stats/trends').expect(200);
-      expect(res.body.data.groupBy).toBe('institution');
-      const groups = res.body.data.groups;
-      expect(groups.map((g) => [g.slug, g.cases, g.decided, g.ongoing, g.medianDaysToDecision])).toEqual([
-        ['kpk', 2, 2, 0, 80], // (100 + 60) / 2
-        ['kejaksaan-agung', 1, 1, 0, 10],
-        ['polri', 1, 0, 1, null],
+      const data = res.body.data;
+      expect(data).toMatchObject({ groupBy: 'institution', minSamples: 3, method: { measure: 'PENYIDIKAN_TO_PUTUSAN', verifiedStagesOnly: true } });
+      expect(data.groups.map((g) => [g.slug, g.cases, g.samples, g.lowSample, g.medianDays])).toEqual([
+        ['kpk', 3, 3, false, 100],
+        ['kejaksaan-agung', 3, 3, false, 20],
+        ['polri', 1, 1, true, 400],
+        ['polda', 1, 0, true, null],
       ]);
-      expect(groups[0]).toMatchObject({ key: 'KPK', label: 'KPK', avgDaysToDecision: 80, longestOpenDays: null });
-      expect(groups[0].medianDaysPerStage).toEqual({ PELAPORAN: null, PENYIDIKAN: 45.5, PENUNTUTAN: 29, PERSIDANGAN: 40, PUTUSAN: null });
-      expect(groups[2].longestOpenDays).toBeGreaterThan(365);
+      expect(data.groups[0]).toMatchObject({ key: 'KPK', label: 'KPK', avgDays: 100, minDays: 90, maxDays: 110, decided: 3, ongoing: 0 });
+      expect(data.coverage).toMatchObject({ cases: 9, measuredCases: 7 });
+    });
+
+    it('ignores stages that have no verified source', async () => {
+      await seed({ title: 'Kasus Belum Diverifikasi', institution: 'KPK' }, tl(50), { verified: false });
+      const c = await seed({ title: 'Kasus Setengah Diverifikasi', institution: 'KPK' }, tl(60));
+      // un-verify the verdict stage's source: the case can no longer be measured
+      await prisma.source.updateMany({ where: { caseId: c.id, stage: { stageType: 'PUTUSAN' } }, data: { isVerified: false } });
+      clearInsightsCache();
+      const { groups, coverage } = (await api().get('/api/stats/trends').expect(200)).body.data;
+      expect(groups[0]).toMatchObject({ slug: 'kpk', cases: 2, samples: 0, medianDays: null });
+      expect(coverage).toMatchObject({ cases: 2, measuredCases: 0, verifiedStages: 1, stages: 4 });
     });
 
     it('supports court, region and category and validates groupBy', async () => {
@@ -146,7 +169,7 @@ describe('trends, people and institutions', () => {
       await seed({ title: 'Kasus KPK Jalan', institution: 'KPK' }, [['PENYIDIKAN', '2024-01-01']]);
       await seed({ title: 'Kasus Polri Lain', institution: 'Polri' });
       const res = await api().get('/api/institutions/kpk').expect(200);
-      expect(res.body.data).toMatchObject({ name: 'KPK', slug: 'kpk', stats: { cases: 2, decided: 1, ongoing: 1, medianDaysToDecision: 60 } });
+      expect(res.body.data).toMatchObject({ name: 'KPK', slug: 'kpk', stats: { cases: 2, decided: 1, ongoing: 1, medianDaysToDecision: 60, samples: 1, lowSample: true } });
       expect(res.body.data.cases.map((c) => c.title).sort()).toEqual(['Kasus KPK Jalan', 'Kasus KPK Putus']);
       expect(res.body.data.cases[0]).toHaveProperty('activeStage');
       await api().get('/api/institutions/tidak-ada').expect(404);
