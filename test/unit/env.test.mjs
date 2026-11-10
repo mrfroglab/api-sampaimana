@@ -42,4 +42,14 @@ describe('parseEnv', () => {
     expect(e.RATE_LIMIT_DISABLED).toBe(true);
     expect(parseEnv({ ...base, PORT: 'abc' }).errors?.join()).toMatch(/PORT/);
   });
+
+  it('turns reminders on by default only in production, and reads STALE_DAYS', () => {
+    expect(parseEnv(base).env.REMINDERS_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, NODE_ENV: 'production', CORS_ORIGIN: 'https://a.id' }).env.REMINDERS_ENABLED).toBe(true);
+    expect(parseEnv({ ...base, NODE_ENV: 'production', CORS_ORIGIN: 'https://a.id', REMINDERS_ENABLED: 'false' }).env.REMINDERS_ENABLED).toBe(false);
+    expect(parseEnv({ ...base, REMINDERS_ENABLED: 'true' }).env.REMINDERS_ENABLED).toBe(true);
+    expect(parseEnv(base).env.STALE_DAYS).toBe(30);
+    expect(parseEnv({ ...base, STALE_DAYS: '14' }).env.STALE_DAYS).toBe(14);
+    expect(parseEnv({ ...base, STALE_DAYS: '0' }).errors?.join()).toMatch(/STALE_DAYS/);
+  });
 });
