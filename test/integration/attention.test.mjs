@@ -53,6 +53,25 @@ describe('editorial attention', () => {
     expect(staleList[0].stage).toMatchObject({ stageType: 'PERSIDANGAN' });
   });
 
+  it('flags cases in the admin list and filters to the ones that need checking', async () => {
+    const late = await seedCase('Kasus Terlambat', { dueAt: ago(4) });
+    const stale = await seedCase('Kasus Menggantung', { lastActivityAt: ago(45) });
+    const soon = await seedCase('Kasus Segera', { dueAt: new Date(Date.now() + 2.5 * DAY) });
+    const fine = await seedCase('Kasus Sehat');
+
+    const all = (await api().get('/api/admin/cases').set(auth()).expect(200)).body.data;
+    const flag = (c) => all.find((r) => r.id === c.id);
+    expect(flag(late)).toMatchObject({ attention: 'OVERDUE', attentionDays: 4 });
+    expect(flag(stale)).toMatchObject({ attention: 'STALE', attentionDays: 45 });
+    expect(flag(soon)).toMatchObject({ attention: 'DUE_SOON' });
+    expect(flag(fine)).toMatchObject({ attention: null, attentionDays: null });
+
+    const check = (await api().get('/api/admin/cases?attention=check').set(auth()).expect(200)).body;
+    expect(check.data.map((r) => r.id).sort()).toEqual([late.id, stale.id].sort());
+    expect(check.meta.total).toBe(2);
+    await api().get('/api/admin/cases?attention=bogus').set(auth()).expect(400);
+  });
+
   it('is open to staff but not to contributors or anonymous visitors', async () => {
     const viewer = await makeUser('VIEWER');
     const contributor = await makeUser();
