@@ -25,9 +25,9 @@ const runEditorialDigest = async (now = new Date(), { db = prisma, staleDays = e
     data: recipients.map((u) => ({ userId: u.id, type: 'EDITORIAL_REMINDER', title, body, link: '/redaksi' })),
   });
 
+  const emailRecipients = recipients.filter((u) => u.emailNotifications);
   const mailed = await Promise.all(
-    recipients
-      .filter((u) => u.emailNotifications)
+    emailRecipients
       .map((u) =>
         sendMail({
           to: u.email,
@@ -39,7 +39,15 @@ const runEditorialDigest = async (now = new Date(), { db = prisma, staleDays = e
         }),
       ),
   );
-  return { sent: recipients.length, emailed: mailed.filter(Boolean).length, skipped: false, counts };
+  const emailed = mailed.filter(Boolean).length;
+  if (!env.isTest) {
+    // Always leave a trace; without SMTP this log line is the digest's only email-side output.
+    console.log(
+      `[pengingat-redaksi] ${title} | notifikasi aplikasi: ${recipients.length}, email: ${emailed}/${emailRecipients.length}` +
+        `${emailRecipients.length && !emailed ? ' (SMTP belum diatur atau gagal)' : ''}`,
+    );
+  }
+  return { sent: recipients.length, emailed, skipped: false, counts };
 };
 
 module.exports = { runEditorialDigest };
