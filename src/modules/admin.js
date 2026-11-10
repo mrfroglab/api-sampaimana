@@ -6,6 +6,10 @@ const { ok, created, parse, notFound, badRequest, conflict, forbidden, paginatio
 const { uniqueSlug } = require('../lib/slug');
 const { audit, recordRevision } = require('../lib/audit');
 const { notifyFollowers, notifyUser } = require('../lib/notify');
+const { getCase, createStageTx, announceStage, touch } = require('../lib/stages');
+const { slugify } = require('../lib/slug');
+const { loadAttention } = require('../lib/attention');
+const { clearInsightsCache } = require('../lib/cache');
 const { revokeAllForUser } = require('../lib/tokens');
 const { STATUS_ORDER, STATUS_LABEL, STAGE_STATUS_LABEL } = require('../lib/labels');
 const { authenticate, authorize, STAFF, EDITORS } = require('../middlewares/auth');
@@ -15,6 +19,12 @@ const router = express.Router();
 router.use(authenticate, authorize(...STAFF));
 const canEdit = authorize(...EDITORS);
 const superOnly = authorize('SUPER_ADMIN');
+
+// Public aggregates (trends) are cached for minutes; drop them after any successful admin write.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => res.statusCode < 400 && clearInsightsCache());
+  next();
+});
 
 /* ---------- shared schemas ---------- */
 
@@ -32,6 +42,21 @@ const defendantSchema = z.object({
   description: optionalText(1000),
 });
 
+const sippUrlSchema = z.preprocess(
+  (v) => (v === '' ? null : v),
+  z
+    .string()
+    .trim()
+    .max(500)
+    .url('Tautan SIPP tidak valid.')
+    .refine((u) => /^https?:\/\//i.test(u), 'Tautan SIPP harus http(s).')
+    .nullable()
+    .optional(),
+);
+
+/** Defendants are stored with a slug (same person may appear in several cases). */
+const withSlugs = (defendants) => defendants.map((d) => ({ ...d, slug: slugify(d.name) || 'pihak' }));
+
 const caseSchema = z.object({
   caseNumber: z.string().trim().min(1, 'Nomor perkara wajib diisi.').max(120),
   title: z.string().trim().min(5, 'Judul minimal 5 karakter.').max(200),
@@ -42,6 +67,7 @@ const caseSchema = z.object({
   institution: optionalText(120),
   court: optionalText(160),
   region: optionalText(120),
+  sippUrl: sippUrlSchema,
   filedAt: optionalDate,
   defendants: z.array(defendantSchema).max(50).default([]),
   reason: optionalText(1000),
@@ -74,88 +100,6 @@ const sourceSchema = z.object({
 
 const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '—');
 
-/* ---------- case helpers ---------- */
-
-const getCase = async (id, db = prisma) => {
-  const found = await db.case.findUnique({ where: { id } });
-  if (!found) throw notFound('Kasus tidak ditemukan.');
-  return found;
-};
-
-/**
- * Keeps the case status consistent with its timeline: when a stage becomes
- * AKTIF, earlier active stages are closed and the case status follows it.
- * Returns the previous status if it changed.
- */
-const syncActiveStage = async (tx, caseRow, stage, userId, reason) => {
-  if (stage.status !== 'AKTIF') return null;
-  await tx.caseStage.updateMany({
-    where: { caseId: caseRow.id, status: 'AKTIF', id: { not: stage.id } },
-    data: { status: 'SELESAI' },
-  });
-  await tx.caseStage.updateMany({
-    where: { caseId: caseRow.id, status: 'SELESAI', endedAt: null, id: { not: stage.id }, startedAt: { lte: stage.startedAt } },
-    data: { endedAt: stage.startedAt },
-  });
-  if (caseRow.currentStatus === stage.stageType) return null;
-  await tx.case.update({ where: { id: caseRow.id }, data: { currentStatus: stage.stageType } });
-  await recordRevision(tx, {
-    caseId: caseRow.id,
-    userId,
-    action: 'STATUS_CHANGED',
-    summary: `Status berubah dari ${STATUS_LABEL[caseRow.currentStatus]} ke ${STATUS_LABEL[stage.stageType]}`,
-    reason,
-    changes: { currentStatus: { from: caseRow.currentStatus, to: stage.stageType } },
-  });
-  return caseRow.currentStatus;
-};
-
-const touch = (tx, caseId) => tx.case.update({ where: { id: caseId }, data: { lastActivityAt: new Date() } });
-
-const createStageTx = async (tx, caseRow, data, userId) => {
-  const stage = await tx.caseStage.create({
-    data: {
-      caseId: caseRow.id,
-      stageType: data.stageType,
-      status: data.status,
-      title: data.title,
-      summary: data.summary,
-      startedAt: data.startedAt ?? new Date(),
-      endedAt: data.endedAt ?? null,
-      dueAt: data.dueAt ?? null,
-      createdById: userId,
-    },
-  });
-  await recordRevision(tx, {
-    caseId: caseRow.id,
-    userId,
-    action: 'STAGE_ADDED',
-    summary: `Tahapan ${STATUS_LABEL[stage.stageType]} ditambahkan${stage.title ? `: ${stage.title}` : ''}`,
-    reason: data.reason,
-  });
-  const previousStatus = await syncActiveStage(tx, caseRow, stage, userId, data.reason);
-  await touch(tx, caseRow.id);
-  return { stage, previousStatus };
-};
-
-const announceStage = (caseRow, stage, previousStatus, userId) => {
-  if (previousStatus) {
-    notifyFollowers(caseRow, {
-      type: 'STATUS_CHANGE',
-      title: `${caseRow.title} kini memasuki tahap ${STATUS_LABEL[stage.stageType]}`,
-      body: `Status kasus berubah dari ${STATUS_LABEL[previousStatus]} ke ${STATUS_LABEL[stage.stageType]}${stage.title ? `: ${stage.title}` : ''}.`,
-      excludeUserId: userId,
-    });
-  } else {
-    notifyFollowers(caseRow, {
-      type: 'STAGE_UPDATE',
-      title: `Pembaruan: ${caseRow.title}`,
-      body: `Tahapan ${STATUS_LABEL[stage.stageType]} diperbarui${stage.title ? `: ${stage.title}` : ''}.`,
-      excludeUserId: userId,
-    });
-  }
-};
-
 /* ---------- overview ---------- */
 
 router.get('/overview', async (req, res) => {
@@ -187,6 +131,10 @@ router.get('/overview', async (req, res) => {
     overdueStages: overdue,
   });
 });
+
+/* ---------- editorial attention ---------- */
+
+router.get('/attention', async (req, res) => ok(res, await loadAttention(prisma)));
 
 /* ---------- cases ---------- */
 
@@ -256,7 +204,7 @@ router.post('/cases', canEdit, async (req, res) => {
   const { defendants, reason, ...data } = parse(caseSchema, req.body);
   const slug = await uniqueSlug(prisma.case, data.title);
   const result = await prisma.$transaction(async (tx) => {
-    const caseRow = await tx.case.create({ data: { ...data, slug, defendants: { create: defendants } } });
+    const caseRow = await tx.case.create({ data: { ...data, slug, defendants: { create: withSlugs(defendants) } } });
     await tx.caseStage.create({
       data: {
         caseId: caseRow.id,
@@ -279,7 +227,7 @@ router.post('/cases', canEdit, async (req, res) => {
   return created(res, result, 'Kasus dibuat.');
 });
 
-const TRACKED_FIELDS = ['caseNumber', 'title', 'summary', 'description', 'categoryId', 'currentStatus', 'institution', 'court', 'region', 'filedAt'];
+const TRACKED_FIELDS = ['caseNumber', 'title', 'summary', 'description', 'categoryId', 'currentStatus', 'institution', 'court', 'region', 'sippUrl', 'filedAt'];
 const FIELD_LABEL = {
   caseNumber: 'nomor perkara',
   title: 'judul',
@@ -290,6 +238,7 @@ const FIELD_LABEL = {
   institution: 'lembaga',
   court: 'pengadilan',
   region: 'wilayah',
+  sippUrl: 'tautan SIPP',
   filedAt: 'tanggal mulai',
   defendants: 'pihak terkait',
 };
@@ -305,7 +254,8 @@ router.put('/cases/:id', canEdit, async (req, res) => {
   }
 
   const norm = (v) => (v instanceof Date ? v.toISOString() : (v ?? null));
-  const changed = TRACKED_FIELDS.filter((f) => norm(data[f]) !== norm(existing[f]));
+  // sippUrl left out of the payload means "keep"; an explicit null/'' clears it.
+  const changed = TRACKED_FIELDS.filter((f) => !(f === 'sippUrl' && data.sippUrl === undefined) && norm(data[f]) !== norm(existing[f]));
   const defendantKey = (list) => JSON.stringify(list.map((d) => [d.name, d.role, d.description ?? null]));
   const defendantsChanged = defendantKey(defendants) !== defendantKey(existing.defendants);
   if (defendantsChanged) changed.push('defendants');
@@ -321,7 +271,7 @@ router.put('/cases/:id', canEdit, async (req, res) => {
         slug,
         filedAt: data.filedAt ?? null,
         lastActivityAt: changed.length ? new Date() : existing.lastActivityAt,
-        ...(defendantsChanged ? { defendants: { create: defendants } } : {}),
+        ...(defendantsChanged ? { defendants: { create: withSlugs(defendants) } } : {}),
       },
       include: { defendants: true, category: true },
     });
@@ -379,6 +329,10 @@ router.post('/cases/:id/restore', canEdit, async (req, res) => {
   audit(req, 'RESTORE_CASE', 'Case', req.params.id);
   return ok(res, null, { message: 'Kasus dipulihkan.' });
 });
+
+/* ---------- SIPP import (editors only) ---------- */
+
+router.use(require('./sipp'));
 
 /* ---------- stages ---------- */
 

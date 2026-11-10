@@ -34,7 +34,15 @@ app.use(
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   }),
 );
-app.use(express.json({ limit: '200kb' }));
+// The SIPP import takes a pasted web page (up to 2 MB of text); everything else stays small.
+// The larger limit only applies to authenticated requests.
+const jsonDefault = express.json({ limit: '200kb' });
+const jsonSipp = express.json({ limit: '4mb' });
+app.use((req, res, next) =>
+  req.method === 'POST' && req.headers.authorization && /^\/api\/admin\/cases\/[^/]+\/sipp\/(preview|apply)\/?$/.test(req.path)
+    ? jsonSipp(req, res, next)
+    : jsonDefault(req, res, next),
+);
 app.use(express.urlencoded({ extended: false, limit: '200kb' }));
 app.use(cookieParser());
 
@@ -44,6 +52,7 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, { customSiteTitle
 app.get('/api/openapi.json', (req, res) => res.json(openapi));
 
 app.use('/api', require('./modules/meta'));
+app.use('/api', require('./modules/insights'));
 app.use('/api/auth', require('./modules/auth'));
 app.use('/api/cases', require('./modules/cases'));
 app.use('/api/me', require('./modules/account'));
