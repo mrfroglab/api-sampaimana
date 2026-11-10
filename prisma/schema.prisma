@@ -53,6 +53,7 @@ enum NotificationType {
   STAGE_UPDATE
   ARTICLE_PUBLISHED
   CONTRIBUTION_REVIEWED
+  EDITORIAL_REMINDER
 }
 
 model User {
@@ -116,12 +117,15 @@ model Defendant {
   caseId      String
   case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
   name        String
+  /// slugify(name). Not unique: the same person can appear in several cases.
+  slug        String
   role        String
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([caseId])
+  @@index([slug])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "defendants_name_trgm_idx")
   @@map("defendants")
 }
@@ -138,6 +142,8 @@ model Case {
   currentStatus  CaseStatus          @default(PELAPORAN)
   institution    String?
   court          String?
+  /// Link to the SIPP "Detil Perkara" page the editors import from.
+  sippUrl        String?
   region         String?
   filedAt        DateTime?
   lastActivityAt DateTime            @default(now())
@@ -323,4 +329,15 @@ model ActivityLog {
 
   @@index([createdAt])
   @@map("activity_logs")
+}
+
+/// One row per (job, day) so scheduled jobs run at most once a day across instances.
+model JobRun {
+  id        String   @id @default(uuid())
+  name      String
+  runDate   String
+  createdAt DateTime @default(now())
+
+  @@unique([name, runDate])
+  @@map("job_runs")
 }
