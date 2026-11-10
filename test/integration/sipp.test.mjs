@@ -48,6 +48,17 @@ describe('SIPP import', () => {
 
     const detail = (await api().get(`/api/cases/${c.slug}`)).body.data;
     expect(detail.sippUrl).toBe(sippUrl);
+    // The SIPP page is recorded as an (unverified) court source of the imported stage.
+    const sources = await prisma.source.findMany({ where: { caseId: c.id } });
+    expect(sources).toEqual([
+      expect.objectContaining({
+        url: sippUrl,
+        type: 'COURT',
+        stageId: res.body.data.created[0].id,
+        publisher: 'SIPP PN Bandung',
+        isVerified: false,
+      }),
+    ]);
     expect(detail.currentStatus).toBe('PUTUSAN');
     // Timeline is ordered by date: the verdict (2024) precedes the placeholder stage created "today".
     expect(detail.stages.map((s) => [s.stageType, s.status])).toEqual([['PUTUSAN', 'AKTIF'], ['PENUNTUTAN', 'SELESAI']]);

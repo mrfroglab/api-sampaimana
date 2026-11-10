@@ -84,6 +84,22 @@ router.post('/cases/:id/sipp/apply', ...guard, async (req, res) => {
       created.push(stage);
     }
 
+    // The SIPP page is the source of what we just imported: attach it to every new stage as a court source.
+    // It starts unverified; marking it verified is a separate editorial decision.
+    const sourceUrl = sippUrl ?? initial.sippUrl;
+    if (sourceUrl && created.length) {
+      await tx.source.createMany({
+        data: created.map((stage) => ({
+          caseId: initial.id,
+          stageId: stage.id,
+          title: `Halaman perkara di SIPP${parsed.caseNumber ? ` (${parsed.caseNumber})` : ''}`,
+          url: sourceUrl,
+          publisher: parsed.court ? `SIPP ${parsed.court}` : 'SIPP',
+          type: 'COURT',
+        })),
+      });
+    }
+
     const urlChanged = sippUrl !== undefined && sippUrl !== initial.sippUrl;
     if (urlChanged) await tx.case.update({ where: { id: initial.id }, data: { sippUrl } });
     if (created.length || urlChanged) {
