@@ -142,11 +142,27 @@ const adminListSchema = pagination.extend({
   q: z.string().trim().max(120).optional(),
   status: z.preprocess(blankToUndef, statusEnum.optional()),
   state: z.enum(['active', 'inactive', 'all']).default('active'),
+  // `check` = only cases that need an editor's attention (stage past its due date, or no update for STALE_DAYS).
+  attention: z.preprocess(blankToUndef, z.enum(['check']).optional()),
 });
+
+/** caseId -> { reason: 'OVERDUE' | 'STALE' | 'DUE_SOON', days } (most urgent reason wins). */
+const attentionIndex = async () => {
+  const a = await loadAttention(prisma);
+  const index = new Map();
+  [['DUE_SOON', a.dueSoon], ['STALE', a.stale], ['OVERDUE', a.overdue]].forEach(([reason, list]) =>
+    list.forEach((i) => index.set(i.case.id, { reason, days: i.days })),
+  );
+  return index;
+};
 
 router.get('/cases', async (req, res) => {
   const query = parse(adminListSchema, req.query);
+  const attention = await attentionIndex();
   const where = {};
+  if (query.attention === 'check') {
+    where.id = { in: [...attention].filter(([, v]) => v.reason !== 'DUE_SOON').map(([id]) => id) };
+  }
   if (query.state !== 'all') where.isActive = query.state === 'active';
   if (query.status) where.currentStatus = query.status;
   if (query.q) {
@@ -176,6 +192,8 @@ router.get('/cases', async (req, res) => {
       ...c,
       pendingContributions: contributions.length,
       openCorrections: corrections.length,
+      attention: attention.get(c.id)?.reason ?? null,
+      attentionDays: attention.get(c.id)?.days ?? null,
     })),
     { meta: pageMeta(total, query.page, query.limit) },
   );

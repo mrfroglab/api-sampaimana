@@ -393,7 +393,7 @@ module.exports = {
       }),
     },
     '/api/admin/cases': {
-      get: op('Redaksi', 'Daftar kasus (termasuk arsip)', { security: secured }),
+      get: op('Redaksi', 'Daftar kasus (termasuk arsip). Setiap baris punya `attention` (OVERDUE | STALE | DUE_SOON | null) dan `attentionDays`; `?attention=check` hanya menampilkan kasus yang perlu dicek (tahapan aktif lewat tenggat, atau tanpa pembaruan selama STALE_DAYS)', { security: secured }),
       post: op('Redaksi', 'Buat kasus (opsional `sippUrl`, http/https)', { security: secured }),
     },
     '/api/admin/cases/{id}': {
