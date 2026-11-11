@@ -10,7 +10,8 @@ Instruksi untuk agen AI (Claude Code dan sejenisnya) yang mengerjakan repo ini. 
 - Hal khusus API: [CONTRIBUTING.md](CONTRIBUTING.md). Alur kerja umum: CONTRIBUTING.md repo web.
 - **Merge/push ke `main` = deploy ke produksi**, termasuk migrasi database. Jangan push ke `main` atau merge PR tanpa persetujuan
   eksplisit pengelola.
-- `PRD.md` (dokumen kebutuhan produk) ada di root checkout utama **repo web**, di-*gitignore*. Baca bila ada.
+- `PRD.md` (dokumen kebutuhan produk) ada di root checkout utama **repo web**, di-*gitignore*. Baca bila ada, dan setelah fitur
+  di-merge perbarui kolom status di sana.
 
 ## Dokumentasi harus tetap sinkron
 
