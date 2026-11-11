@@ -6,3 +6,6 @@ uploads/
 coverage/
 .DS_Store
 *.log
+
+# Dokumen kebutuhan produk: hanya lokal, repo ini publik
+PRD.md

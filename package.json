@@ -2,6 +2,7 @@
   "name": "sampaimana-api",
   "version": "2.0.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "API Sampai Mana — pelacak perkembangan kasus hukum publik",
   "main": "src/server.js",
   "packageManager": "pnpm@10.18.0",
@@ -21,7 +22,9 @@
     "prepare": "husky || true",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
-    "test:coverage": "vitest run --project unit --coverage"
+    "test:coverage": "vitest run --project unit --coverage",
+    "docs:check": "node scripts/docs-check.mjs",
+    "changelog": "node scripts/changelog.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
