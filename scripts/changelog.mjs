@@ -28,6 +28,9 @@ const SUBJECT = /^(\w+)(?:\(([^)]+)\))?(!)?:\s+(.+)$/;
 const wib = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' });
 
 export function readCommits(cwd = ROOT) {
+  // A shallow clone hides older commits, so the result would differ from CI (which fetches the full history).
+  const shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd, encoding: 'utf8' }).trim() === 'true';
+  if (shallow) throw new Error('Riwayat git terpotong (shallow clone). Jalankan `git fetch --unshallow` lalu ulangi.');
   const out = execFileSync('git', ['log', '--no-merges', '--format=%aI%x1f%s%x1e', 'HEAD'], { cwd, encoding: 'utf8' });
   return out
     .split('\x1e')
