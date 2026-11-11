@@ -1,2 +1,3 @@
 pnpm run check
 pnpm test:unit
+pnpm docs:check --no-changelog

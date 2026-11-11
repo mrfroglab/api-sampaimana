@@ -33,6 +33,8 @@ jobs:
       DATABASE_URL: postgresql://sm:sm@localhost:5432/sampaimana_test?schema=public
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # docs:check rebuilds CHANGELOG.md from the full history
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -42,6 +44,7 @@ jobs:
       - run: pnpm exec prisma generate
       - run: pnpm exec prisma validate
       - run: pnpm run check
+      - run: pnpm docs:check
       - name: Unit tests (with coverage)
         run: pnpm test:coverage
       - name: Integration tests
