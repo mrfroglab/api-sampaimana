@@ -24,3 +24,11 @@ Perubahan yang terasa bagi pengguna, dikelompokkan per tanggal (WIB). Detail tek
 ### Perbaikan
 
 - per-visitor rate limits behind the proxy and quiet anonymous refresh
+
+## 2026-06-29
+
+### Perbaikan
+
+- use bullseye-slim for OpenSSL 1.1 compatibility
+- **dockerfile:** use slim base for Prisma compatibility
+- switch base image to node:20-slim for Prisma libssl
